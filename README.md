@@ -10,6 +10,7 @@ Plotty is a Python CLI tool for real-time plotting of CSV data from various sour
     -   **HTTP/HTTPS**: Fetches data from a URL.
     -   **SSH**: Connects to a remote server and reads a file (supports authentication agents and password prompts).
     -   **Serial Port**: Reads from devices like Arduino, sensors, or other serial interfaces.
+    -   **TCP Socket**: Connects to a TCP hostname and port to read streaming CSV strings.
 -   **Visuals**:
     -   Dark theme by default.
     -   Gridlines for better readability.
@@ -46,6 +47,7 @@ pip install matplotlib pyserial
     -   **URL**: `http://example.com/data.csv`
     -   **SSH**: `user@host:/path/to/remote/file.csv`
     -   **Serial**: `/dev/ttyUSB0` or `COM1`
+    -   **TCP Socket**: `host[:port]` (e.g., `localhost:9000` or `192.168.1.100`)
 -   `X_COLUMN`: Index of the column to use for the X-axis (0-based).
 -   `Y_COLUMNS`: One or more indices of columns to use for the Y-axis (0-based).
 
@@ -79,4 +81,10 @@ Connect to `myserver`, read `telemetry.csv`, and plot columns 0, 1, and 3. The p
 Plot data from a sensor connected to `COM3` at 9600 baud:
 ```bash
 ./plotty.py -b 9600 COM3 0 1
+```
+
+### TCP Socket
+Plot real-time streaming data from a TCP socket server on `localhost` port `9000`:
+```bash
+./plotty.py localhost:9000 0 1
 ```

@@ -7,12 +7,13 @@ import queue
 import subprocess
 import urllib.request
 import re
+import socket
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Plot values from CSV strings.")
-    parser.add_argument("source", help="Source of the CSV strings (file path, URL, or user@host:path)")
+    parser.add_argument("source", help="Source of the CSV strings (file path, URL, user@host:path, or host[:port])")
     parser.add_argument("columns", nargs='+', type=int, help="List of column indices to plot. First is X, rest are Ys.")
     parser.add_argument("-f", "--follow", action="store_true", help="Follow the source (like tail -f)")
     parser.add_argument("-t", "--title", action="store_true", help="Use first row as titles")
@@ -263,6 +264,92 @@ class SerialSource(DataSource):
              if self.serial_conn and self.serial_conn.is_open:
                  self.serial_conn.close()
 
+class SocketSource(DataSource):
+    def __init__(self, source, follow=False):
+        super().__init__(source, follow)
+        self.host = None
+        self.port = None
+        self.socket_conn = None
+        self.socket_file = None
+        self._parse_source()
+
+    def _parse_source(self):
+        if ":" in self.source:
+            host, port_str = self.source.rsplit(":", 1)
+            try:
+                self.port = int(port_str)
+                self.host = host
+            except ValueError:
+                self.host = self.source
+                self.port = 9000
+        else:
+            self.host = self.source
+            self.port = 9000
+
+    def connect(self):
+        try:
+            self.socket_conn = socket.create_connection((self.host, self.port), timeout=5)
+            self.socket_file = self.socket_conn.makefile('r', encoding='utf-8', errors='ignore')
+            line = self.socket_file.readline()
+            return line.strip() if line else None
+        except Exception as e:
+            print(f"Error connecting to socket '{self.host}:{self.port}': {e}")
+            sys.exit(1)
+
+    def _read_loop(self):
+        if not self.socket_file:
+            return
+        try:
+            while self.running:
+                line = self.socket_file.readline()
+                if line:
+                    self.queue.put(line.strip())
+                else:
+                    break
+        except Exception as e:
+            if self.running:
+                print(f"Error reading from socket: {e}")
+        finally:
+            self.close()
+
+    def close(self):
+        if self.socket_file:
+            try:
+                self.socket_file.close()
+            except:
+                pass
+            self.socket_file = None
+        if self.socket_conn:
+            try:
+                self.socket_conn.close()
+            except:
+                pass
+            self.socket_conn = None
+
+    def stop(self):
+        super().stop()
+        self.close()
+
+def is_socket_source(source):
+    if ":" in source:
+        parts = source.rsplit(":", 1)
+        if parts[1].isdigit():
+            return True
+    
+    ipv4_pattern = r'^(\d{1,3}\.){3}\d{1,3}$'
+    if re.match(ipv4_pattern, source):
+        return True
+        
+    if source == "localhost" or source.endswith(".local"):
+        return True
+        
+    if not os.path.exists(source):
+        hostname_pattern = r'^[a-zA-Z0-9.-]+$'
+        if re.match(hostname_pattern, source):
+            return True
+            
+    return False
+
 def get_source_handler(source, follow, baudrate=115200):
     if source.startswith("http://") or source.startswith("https://"):
         return HttpSource(source, follow)
@@ -270,6 +357,8 @@ def get_source_handler(source, follow, baudrate=115200):
         return SshSource(source, follow)
     elif source.startswith("/dev/tty") or source.upper().startswith("COM"):
         return SerialSource(source, baudrate, follow)
+    elif is_socket_source(source):
+        return SocketSource(source, follow)
     else:
         return LocalFileSource(source, follow)
 
@@ -333,7 +422,7 @@ def main():
         # For SSH, it's consumed. For HTTP, we peeked/cached? 
         # For File, we seeked back.
         
-        if isinstance(source_handler, SshSource):
+        if isinstance(source_handler, (SshSource, SocketSource)):
              source_handler.queue.put(first_line)
         # HttpSource: connect() just peeked/read. 
         # If we re-request in read_loop, we get it again.
